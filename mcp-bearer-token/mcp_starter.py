@@ -1,6 +1,8 @@
 import asyncio
 from typing import Annotated
 import os
+import sys
+from pathlib import Path
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 from fastmcp.server.auth.providers.bearer import BearerAuthProvider, RSAKeyPair
@@ -8,6 +10,15 @@ from mcp import ErrorData, McpError
 from mcp.server.auth.provider import AccessToken
 from mcp.types import TextContent, ImageContent, INVALID_PARAMS, INTERNAL_ERROR
 from pydantic import BaseModel, Field, AnyUrl
+
+# Ensure project root is on sys.path for importing top-level packages like `tools` and `services`
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.append(str(PROJECT_ROOT))
+
+from tools.credit_card_tools import register as register_credit_card_tools
+from tools.currency_converter import register as register_currency_converter
+from tools.flight_search import register as register_flight_search
 
 import markdownify
 import httpx
@@ -202,6 +213,15 @@ async def make_img_black_and_white(
         return [ImageContent(type="image", mimeType="image/png", data=bw_base64)]
     except Exception as e:
         raise McpError(ErrorData(code=INTERNAL_ERROR, message=str(e)))
+
+# --- Register Credit Card Tools (LlamaIndex + Pinecone) ---
+register_credit_card_tools(mcp)
+
+# --- Register Currency Converter Tools ---
+register_currency_converter(mcp)
+
+# --- Register Flight Search Tools ---
+register_flight_search(mcp)
 
 # --- Run MCP Server ---
 async def main():
