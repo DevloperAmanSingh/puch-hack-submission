@@ -482,7 +482,7 @@ def register(mcp: FastMCP) -> None:
             # Rate limit: 3 requests / 4 hours per user
             window_seconds = 4 * 60 * 60
             rl_key = f"rate:flights:{puch_user_id}"
-            if not _rate_limit_allow(rl_key, 3, window_seconds):
+            if not _rate_limit_allow(rl_key, 2, window_seconds):
                 return [TextContent(type="text", text="Rate limit exceeded for flights. Try again after 4 hours.")]
 
             # AI parse path: if user passes a freeform message in from_airport and leaves to/date blank
