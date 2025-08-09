@@ -14,16 +14,19 @@ class RichToolDescription(BaseModel):
 
 
 class CurrencyConverter:
-    """Simple currency converter using free exchange rate API"""
+    """Currency converter using free exchange rate API"""
     
-    BASE_URL = "https://api.exchangerate-api.com/v4/latest/INR"
+    BASE_URL = "https://api.exchangerate-api.com/v4/latest/{}"
     
     @classmethod
-    async def get_exchange_rates(cls) -> dict:
-        """Fetch current exchange rates for INR"""
+    async def get_exchange_rates(cls, base_currency: str = "INR") -> dict:
+        """Fetch current exchange rates for a given base currency (3-letter code)."""
+        base = (base_currency or "").upper()
+        if len(base) != 3:
+            raise McpError(ErrorData(code=INVALID_PARAMS, message="Invalid base currency code"))
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(cls.BASE_URL, timeout=10)
+                response = await client.get(cls.BASE_URL.format(base), timeout=10)
                 response.raise_for_status()
                 data = response.json()
                 return data.get("rates", {})
@@ -31,26 +34,35 @@ class CurrencyConverter:
             raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"Failed to fetch exchange rates: {e}"))
     
     @classmethod
-    async def convert_inr(cls, amount: float, target_currency: str) -> dict:
-        """Convert INR amount to target currency"""
+    async def convert_any(cls, amount: float, from_currency: str, to_currency: str) -> dict:
+        """Convert amount from any currency to any currency using live rates."""
         if amount <= 0:
             raise McpError(ErrorData(code=INVALID_PARAMS, message="Amount must be greater than 0"))
-        
-        rates = await cls.get_exchange_rates()
-        
-        if target_currency not in rates:
-            raise McpError(ErrorData(code=INVALID_PARAMS, message=f"Currency {target_currency} not supported"))
-        
-        rate = rates[target_currency]
+        src = (from_currency or "").upper()
+        dst = (to_currency or "").upper()
+        if len(src) != 3 or len(dst) != 3:
+            raise McpError(ErrorData(code=INVALID_PARAMS, message="Currencies must be 3-letter ISO codes"))
+        if src == dst:
+            return {
+                "from_currency": src,
+                "to_currency": dst,
+                "amount": amount,
+                "converted_amount": round(amount, 2),
+                "exchange_rate": 1.0,
+                "last_updated": "Current rates from exchangerate-api.com",
+            }
+        rates = await cls.get_exchange_rates(src)
+        if dst not in rates:
+            raise McpError(ErrorData(code=INVALID_PARAMS, message=f"Currency {dst} not supported"))
+        rate = float(rates[dst])
         converted_amount = amount * rate
-        
         return {
-            "from_currency": "INR",
-            "to_currency": target_currency,
+            "from_currency": src,
+            "to_currency": dst,
             "amount": amount,
             "converted_amount": round(converted_amount, 2),
             "exchange_rate": rate,
-            "last_updated": "Current rates from exchangerate-api.com"
+            "last_updated": "Current rates from exchangerate-api.com",
         }
 
 
@@ -59,32 +71,27 @@ def register(mcp: FastMCP) -> None:
     
     # Single currency conversion tool
     SingleConversionDesc = RichToolDescription(
-        description="Convert INR to EUR or USD using real-time exchange rates",
-        use_when="When user wants to convert Indian Rupees to Euro or US Dollar",
+        description="Convert between any two currencies using real-time exchange rates",
+        use_when="When user wants to convert money from one currency to another",
         side_effects="Returns converted amount with current exchange rate"
     )
     
     @mcp.tool(description=SingleConversionDesc.model_dump_json())
     async def convert_currency(
-        amount: Annotated[float, Field(description="Amount in INR to convert", ge=0.01)],
-        target_currency: Annotated[str, Field(description="Target currency (EUR or USD)", pattern="^(EUR|USD)$")] = "USD"
+        amount: Annotated[float, Field(description="Amount to convert", ge=0.01)],
+        from_currency: Annotated[str, Field(description="Source currency (ISO 4217, e.g., INR, USD, EUR)", pattern="^[A-Za-z]{3}$")],
+        to_currency: Annotated[str, Field(description="Target currency (ISO 4217, e.g., USD, EUR, INR)", pattern="^[A-Za-z]{3}$")]
     ) -> List[TextContent]:
-        """Convert INR to EUR or USD"""
+        """Convert between any two currencies"""
         try:
-            result = await CurrencyConverter.convert_inr(amount, target_currency)
+            result = await CurrencyConverter.convert_any(amount, from_currency, to_currency)
             
             formatted_response = f"""## Currency Conversion
 
-**From:** {result['amount']} INR
+**From:** {result['amount']} {result['from_currency']}
 **To:** {result['converted_amount']} {result['to_currency']}
-**Exchange Rate:** 1 INR = {result['exchange_rate']} {result['to_currency']}
+**Exchange Rate:** 1 {result['from_currency']} = {result['exchange_rate']} {result['to_currency']}
 
-**Conversion Details:**
-- Amount: ₹{result['amount']:,.2f}
-- Converted: {result['converted_amount']:,.2f} {result['to_currency']}
-- Rate Source: {result['last_updated']}
-
----
 **JSON Data:**
 ```json
 {json.dumps(result, indent=2)}
@@ -95,79 +102,30 @@ def register(mcp: FastMCP) -> None:
         except Exception as e:
             raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"Conversion failed: {e}"))
     
-    # Multi-currency conversion tool
-    MultiConversionDesc = RichToolDescription(
-        description="Convert INR to both EUR and USD simultaneously",
-        use_when="When user wants to see INR converted to both Euro and US Dollar at once",
-        side_effects="Returns conversions to both currencies with exchange rates"
-    )
-    
-    @mcp.tool(description=MultiConversionDesc.model_dump_json())
-    async def convert_inr_to_both(
-        amount: Annotated[float, Field(description="Amount in INR to convert to both EUR and USD", ge=0.01)]
-    ) -> List[TextContent]:
-        """Convert INR to both EUR and USD"""
-        try:
-            usd_result = await CurrencyConverter.convert_inr(amount, "USD")
-            eur_result = await CurrencyConverter.convert_inr(amount, "EUR")
-            
-            formatted_response = f"""## INR to EUR & USD Conversion
-
-**Original Amount:** ₹{amount:,.2f} INR
-
-**USD Conversion:**
-- Amount: {usd_result['converted_amount']:,.2f} USD
-- Rate: 1 INR = {usd_result['exchange_rate']} USD
-
-**EUR Conversion:**
-- Amount: {eur_result['converted_amount']:,.2f} EUR
-- Rate: 1 INR = {eur_result['exchange_rate']} EUR
-
-**Summary:**
-- ₹{amount:,.2f} INR = ${usd_result['converted_amount']:,.2f} USD
-- ₹{amount:,.2f} INR = €{eur_result['converted_amount']:,.2f} EUR
-
----
-**Exchange Rates:**
-- INR to USD: {usd_result['exchange_rate']}
-- INR to EUR: {eur_result['exchange_rate']}
-- Source: {usd_result['last_updated']}
-"""
-            
-            return [TextContent(type="text", text=formatted_response)]
-            
-        except Exception as e:
-            raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"Multi-conversion failed: {e}"))
-    
     # Exchange rate checker tool
     RateCheckDesc = RichToolDescription(
-        description="Get current exchange rates for INR to EUR and USD",
+        description="Get current exchange rates for a base currency",
         use_when="When user wants to check current exchange rates without converting",
         side_effects="Returns current exchange rates from reliable source"
     )
     
     @mcp.tool(description=RateCheckDesc.model_dump_json())
-    async def check_exchange_rates() -> List[TextContent]:
-        """Get current exchange rates for INR"""
+    async def check_exchange_rates(
+        base_currency: Annotated[str, Field(description="Base currency (ISO 4217, e.g., INR, USD)", pattern="^[A-Za-z]{3}$")] = "INR"
+    ) -> List[TextContent]:
+        """Get current exchange rates for a base currency"""
         try:
-            rates = await CurrencyConverter.get_exchange_rates()
+            rates = await CurrencyConverter.get_exchange_rates(base_currency)
+            base = base_currency.upper()
             
-            usd_rate = rates.get("USD", "N/A")
-            eur_rate = rates.get("EUR", "N/A")
+            # Show a few common rates if present
+            common = {k: rates[k] for k in ["USD", "EUR", "INR", "GBP", "JPY", "AED", "AUD"] if k in rates}
             
-            formatted_response = f"""## Current Exchange Rates (INR)
+            formatted_response = f"""## Current Exchange Rates (Base: {base})
 
-**USD Rate:** 1 INR = {usd_rate} USD
-**EUR Rate:** 1 INR = {eur_rate} EUR
-
-**Quick Conversions:**
-- ₹100 INR = ${100 * usd_rate:.2f} USD
-- ₹100 INR = €{100 * eur_rate:.2f} EUR
-- ₹1,000 INR = ${1000 * usd_rate:.2f} USD
-- ₹1,000 INR = €{1000 * eur_rate:.2f} EUR
-
-**Source:** exchangerate-api.com
-**Last Updated:** Current rates
+```json
+{json.dumps({'base': base, 'rates': common}, indent=2)}
+```
 """
             
             return [TextContent(type="text", text=formatted_response)]
