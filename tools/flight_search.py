@@ -44,6 +44,7 @@ class RichToolDescription(BaseModel):
     description: str
     use_when: str
     side_effects: str | None = None
+    how: str | None = None
 
 
 class FlightInfo(BaseModel):
@@ -520,7 +521,8 @@ def register(mcp: FastMCP) -> None:
     FlightSearchDesc = RichToolDescription(
         description="Search for one-way flights between cities or airports. Return ONLY the formatted flight data exactly as requested - do NOT summarize, interpret, or ask follow-up questions. Present the data as-is with the specified formatting.",
         use_when="When user wants to find flights between two cities or airports with pricing and schedule details",
-        side_effects="Returns raw flight data with airline info, times, airports, and prices in the exact format specified"
+        side_effects="Returns raw flight data with airline info, times, airports, and prices in the exact format specified",
+        how="Use the search_flights function to search for flights. Dont summarise the response."
     )
     
     @mcp.tool(description=FlightSearchDesc.model_dump_json())
