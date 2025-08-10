@@ -323,93 +323,59 @@ class FlightSearchService:
 
 def _get_iata_code(city_or_code: str) -> str:
     """Convert city name to IATA code or return as-is if already a code."""
-    city_mapping = {
-        # Major Indian cities
-        "delhi": "DEL", "new delhi": "DEL", "mumbai": "BOM", "bombay": "BOM",
-        "bangalore": "BLR", "banglore": "BLR", "bengaluru": "BLR", "chennai": "MAA", "madras": "MAA",
-        "hyderabad": "HYD", "kolkata": "CCU", "calcutta": "CCU", "pune": "PNQ",
-        "ahmedabad": "AMD", "jaipur": "JAI", "lucknow": "LKO", "guwahati": "GAU",
-        "patna": "PAT", "bhopal": "BHO", "indore": "IDR", "vadodara": "BDQ",
-        "nagpur": "NAG", "coimbatore": "CJB", "kochi": "COK", "thiruvananthapuram": "TRV",
-        "visakhapatnam": "VTZ", "bhubaneswar": "BBI", "raipur": "RPR", "jabalpur": "JLR",
-        "amritsar": "ATQ", "varanasi": "VNS", "srinagar": "SXR", "leh": "IXL",
-        "shimla": "SLV", "dehradun": "DED", "chandigarh": "IXC", "goa": "GOI",
-        "port blair": "IXZ", "imphal": "IMF", "agartala": "IXA", "aizawl": "AJL",
-        "dimapur": "DMU", "jodhpur": "JDH", "udaipur": "UDR", "jaisalmer": "JSA",
-        "bikaner": "BKB", "ajmer": "AJM", "kota": "KTU", "bundi": "BUN",
-        # International cities
-        "london": "LHR", "new york": "JFK", "dubai": "DXB", "singapore": "SIN",
-        "bangkok": "BKK", "tokyo": "NRT", "paris": "CDG", "frankfurt": "FRA",
-        "amsterdam": "AMS", "rome": "FCO", "madrid": "MAD", "barcelona": "BCN",
-        "milan": "MXP", "zurich": "ZRH", "vienna": "VIE", "prague": "PRG",
-        "budapest": "BUD", "warsaw": "WAW", "moscow": "SVO", "istanbul": "IST",
-        "doha": "DOH", "abu dhabi": "AUH", "muscat": "MCT", "riyadh": "RUH",
-        "jeddah": "JED", "cairo": "CAI", "nairobi": "NBO", "lagos": "LOS",
-        "johannesburg": "JNB", "cape town": "CPT", "sydney": "SYD", "melbourne": "MEL",
-        "brisbane": "BNE", "perth": "PER", "adelaide": "ADL", "auckland": "AKL",
-        "wellington": "WLG", "fiji": "NAN", "port moresby": "POM", "honolulu": "HNL",
-        "los angeles": "LAX", "san francisco": "SFO", "chicago": "ORD", "miami": "MIA",
-        "toronto": "YYZ", "vancouver": "YVR", "montreal": "YUL", "calgary": "YYC",
-        "edmonton": "YEG", "winnipeg": "YWG", "ottawa": "YOW", "halifax": "YHZ",
-        "quebec": "YQB", "victoria": "YYJ", "kelowna": "YLW", "regina": "YQR",
-        "saskatoon": "YXE", "thunder bay": "YQT", "sudbury": "YSB", "windsor": "YQG",
-        "hamilton": "YHM", "london": "YXU", "kingston": "YGK", "saint john": "YSJ",
-        "fredericton": "YFC", "charlottetown": "YYG", "st johns": "YYT", "whitehorse": "YXY",
-        "yellowknife": "YZF", "iqaluit": "YFB", "rankin inlet": "YRT", "kuujjuaq": "YVP",
-        "val d or": "YVO", "rouyn noranda": "YUY", "saguenay": "YBG", "gaspe": "YGP",
-        "bagotville": "YBG", "valcartier": "YOY", "goose bay": "YYR", "deer lake": "YDF",
-        "gander": "YQX", "stephenville": "YJT", "corner brook": "YDF", "grand falls": "YQX",
-        "labrador city": "YLR", "churchill": "YYQ", "thompson": "YTH", "brandon": "YBR",
-        "saskatoon": "YXE", "regina": "YQR", "prince albert": "YPA", "lloydminster": "YLL",
-        "medicine hat": "YXH", "lethbridge": "YQL", "red deer": "YQF", "grande prairie": "YQU",
-        "fort mcmurray": "YMM", "yellowknife": "YZF", "whitehorse": "YXY", "dawson creek": "YDQ",
-        "fort st john": "YXJ", "prince george": "YXS", "kamloops": "YKA", "kelowna": "YLW",
-        "victoria": "YYJ", "nanaimo": "YCD", "comox": "YQQ", "campbell river": "YBL",
-        "terrace": "YXT", "prince rupert": "YPR", "fort nelson": "YYE", "fort st john": "YXJ",
-        "dawson creek": "YDQ", "grande prairie": "YQU", "edmonton": "YEG", "calgary": "YYC",
-        "red deer": "YQF", "lethbridge": "YQL", "medicine hat": "YXH", "lloydminster": "YLL",
-        "prince albert": "YPA", "regina": "YQR", "saskatoon": "YXE", "brandon": "YBR",
-        "thompson": "YTH", "churchill": "YYQ", "labrador city": "YLR", "grand falls": "YQX",
-        "corner brook": "YDF", "stephenville": "YJT", "gander": "YQX", "deer lake": "YDF",
-        "goose bay": "YYR", "valcartier": "YOY", "bagotville": "YBG", "gaspe": "YGP",
-        "saguenay": "YBG", "rouyn noranda": "YUY", "val d or": "YVO", "kuujjuaq": "YVP",
-        "rankin inlet": "YRT", "iqaluit": "YFB", "yellowknife": "YZF", "whitehorse": "YXY",
-        "st johns": "YYT", "charlottetown": "YYG", "fredericton": "YFC", "saint john": "YSJ",
-        "kingston": "YGK", "london": "YXU", "hamilton": "YHM", "windsor": "YQG",
-        "sudbury": "YSB", "thunder bay": "YQT", "regina": "YQR", "saskatoon": "YXE",
-        "kelowna": "YLW", "victoria": "YYJ", "halifax": "YHZ", "ottawa": "YOW",
-        "winnipeg": "YWG", "edmonton": "YEG", "calgary": "YYC", "vancouver": "YVR",
-        "montreal": "YUL", "toronto": "YYZ", "miami": "MIA", "chicago": "ORD",
-        "san francisco": "SFO", "los angeles": "LAX", "honolulu": "HNL", "port moresby": "POM",
-        "fiji": "NAN", "wellington": "WLG", "auckland": "AKL", "adelaide": "ADL",
-        "perth": "PER", "brisbane": "BNE", "melbourne": "MEL", "sydney": "SYD",
-        "cape town": "CPT", "johannesburg": "JNB", "lagos": "LOS", "nairobi": "NBO",
-        "cairo": "CAI", "jeddah": "JED", "riyadh": "RUH", "muscat": "MCT",
-        "abu dhabi": "AUH", "doha": "DOH", "istanbul": "IST", "moscow": "SVO",
-        "warsaw": "WAW", "budapest": "BUD", "prague": "PRG", "vienna": "VIE",
-        "zurich": "ZRH", "milan": "MXP", "barcelona": "BCN", "madrid": "MAD",
-        "rome": "FCO", "amsterdam": "AMS", "frankfurt": "FRA", "paris": "CDG",
-        "tokyo": "NRT", "bangkok": "BKK", "singapore": "SIN", "dubai": "DXB",
-        "new york": "JFK", "london": "LHR", "bundi": "BUN", "kota": "KTU",
-        "ajmer": "AJM", "bikaner": "BKB", "jaisalmer": "JSA", "udaipur": "UDR",
-        "jodhpur": "JDH", "dimapur": "DMU", "aizawl": "AJL", "agartala": "IXA",
-        "imphal": "IMF", "port blair": "IXZ", "goa": "GOI", "chandigarh": "IXC",
-        "dehradun": "DED", "shimla": "SLV", "leh": "IXL", "srinagar": "SXR",
-        "varanasi": "VNS", "amritsar": "ATQ", "jabalpur": "JLR", "raipur": "RPR",
-        "bhubaneswar": "BBI", "visakhapatnam": "VTZ", "thiruvananthapuram": "TRV",
-        "kochi": "COK", "coimbatore": "CJB", "nagpur": "NAG", "vadodara": "BDQ",
-        "indore": "IDR", "bhopal": "BHO", "patna": "PAT", "guwahati": "GAU",
-        "lucknow": "LKO", "jaipur": "JAI", "ahmedabad": "AMD", "pune": "PNQ",
-        "calcutta": "CCU", "kolkata": "CCU", "madras": "MAA", "bengaluru": "BLR",
-        "bombay": "BOM", "new delhi": "DEL"
-    }
-
     # If it's already a 3-letter code, return as-is
     if len(city_or_code) == 3 and city_or_code.isupper():
         return city_or_code
+    
+    # Use OpenAI to resolve city name to IATA code
+    resolved = _resolve_iata_via_openai(city_or_code)
+    if resolved:
+        return resolved
+    
+    # Fallback: return uppercase version
+    return city_or_code.upper()
 
-    # Look up in mapping (case-insensitive)
-    return city_mapping.get(city_or_code.lower(), city_or_code.upper())
+
+def _resolve_iata_via_openai(city_name: str) -> Optional[str]:
+    """Use OpenAI to resolve city name to IATA airport code."""
+    if not city_name or not isinstance(city_name, str):
+        return None
+
+    if OpenAI is None:
+        return None
+
+    api_key = getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+
+    client = OpenAI(api_key=api_key)
+    system = (
+        "You are an expert at converting city names to IATA airport codes. "
+        "Return ONLY the 3-letter IATA code for the most relevant airport in that city. "
+        "For major cities with multiple airports, return the primary international airport code. "
+        "If you're unsure, return the most likely code. "
+        "Respond with ONLY the 3-letter code, nothing else."
+    )
+    prompt = f"Convert this city name to IATA airport code: {city_name}"
+    
+    try:
+        resp = client.chat.completions.create(
+            model=getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0,
+            max_tokens=10,
+        )
+        content = resp.choices[0].message.content or ""
+        # Clean and validate the response
+        code = content.strip().upper()
+        if len(code) == 3 and code.isalpha():
+            return code
+        return None
+    except Exception:
+        return None
 
 
 def _parse_freeform_query_to_params(message: str) -> Optional[Dict[str, str]]:
