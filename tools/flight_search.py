@@ -82,7 +82,6 @@ class FlightSearchService:
         depart_id: str,
         arrival_id: str,
         depart_date: str,
-        top_k: int,
     ) -> Optional[List[Dict]]:
         """Call RapidAPI one-way search and return normalized flight list."""
         if not cls.RAPIDAPI_KEY:
@@ -123,7 +122,6 @@ class FlightSearchService:
 
         flights: List[Dict] = []
         usd_to_inr: float = await cls._get_usd_to_inr_rate()
-
         def _parse_money_dict(m: Dict) -> Optional[float]:
             try:
                 if not isinstance(m, dict):
@@ -203,17 +201,64 @@ class FlightSearchService:
                     pass
             return None
 
-        # Determine how many offers to process. If top_k <= 0 or None, return all
-        limit = len(sorted_items) if (top_k is None or top_k <= 0) else top_k
-        for idx, offer in enumerate(sorted_items[: limit]):
+        # Process all available offers
+        for idx, offer in enumerate(sorted_items):
             try:
                 segments = offer.get("segments") or []
+
+                
+                # Skip if no segments
+                if not segments:
+                    continue
+                
+                # Extract complete route from all segments and legs
+                complete_route = []
+                all_departure_times = []
+                all_arrival_times = []
+                
+                for segment in segments:
+                    legs = segment.get("legs") or []
+                    for leg in legs:
+                        dep_airport = leg.get("departureAirport") or {}
+                        arr_airport = leg.get("arrivalAirport") or {}
+                        
+                        dep_city = dep_airport.get("cityName", "")
+                        dep_code = dep_airport.get("code", "")
+                        arr_city = arr_airport.get("cityName", "")
+                        arr_code = arr_airport.get("code", "")
+                        
+                        # Only add if we have valid data
+                        if dep_city and dep_code:
+                            route_point = f"{dep_city} ({dep_code})"
+                            if not complete_route or complete_route[-1] != route_point:
+                                complete_route.append(route_point)
+                        
+                        if arr_city and arr_code:
+                            route_point = f"{arr_city} ({arr_code})"
+                            complete_route.append(route_point)
+                        
+                        # Store times
+                        dep_time = _format_time(leg.get("departureTime"))
+                        arr_time = _format_time(leg.get("arrivalTime"))
+                        if dep_time:
+                            all_departure_times.append(dep_time)
+                        if arr_time:
+                            all_arrival_times.append(arr_time)
+                
+                # Remove duplicates while preserving order
+                unique_route = []
+                for stop in complete_route:
+                    if stop not in unique_route:
+                        unique_route.append(stop)
+                
+                # Get first and last times
+                dep_time = all_departure_times[0] if all_departure_times else ""
+                arr_time = all_arrival_times[-1] if all_arrival_times else ""
+                
+                # Get first segment/leg for other details
                 segment0 = segments[0] if segments else {}
                 legs = segment0.get("legs") or []
                 leg0 = legs[0] if legs else {}
-
-                dep_time = _format_time(leg0.get("departureTime") or segment0.get("departureTime"))
-                arr_time = _format_time(leg0.get("arrivalTime") or segment0.get("arrivalTime"))
 
                 carriers_data = (
                     leg0.get("carriersData")
@@ -242,6 +287,7 @@ class FlightSearchService:
                 operating_carrier = carrier_info.get("operatingCarrier", "")
                 marketing_carrier = carrier_info.get("marketingCarrier", "")
 
+                # Get basic airport info from first leg
                 dep_airport = leg0.get("departureAirport") or segment0.get("departureAirport") or {}
                 arr_airport = leg0.get("arrivalAirport") or segment0.get("arrivalAirport") or {}
                 dep_airport_name = dep_airport.get("name", "")
@@ -253,6 +299,14 @@ class FlightSearchService:
                 flight_stops = leg0.get("flightStops") or []
                 stops_count = len(flight_stops) if flight_stops else 0
                 duration_label = "Direct" if stops_count == 0 else f"{stops_count} stop{'s' if stops_count > 1 else ''}"
+                
+                # Create route string with better formatting
+                if len(unique_route) > 2:
+                    # For multi-stop flights, format with arrows
+                    route_string = " → ".join(unique_route)
+                else:
+                    # For direct flights, just show origin and destination
+                    route_string = " → ".join(unique_route)
 
                 price_val = _extract_price(offer)
                 flights.append(
@@ -276,12 +330,13 @@ class FlightSearchService:
                         "depart_id": depart_id,
                         "arrival_id": arrival_id,
                         "date": depart_date,
+                        "route": route_string,
                     }
                 )
             except Exception:
                 pass
 
-        return flights
+        return flights if flights else []
 
     @classmethod
     async def _amadeus_resolve_city_code(cls, city_name: str) -> Optional[str]:
@@ -303,7 +358,7 @@ class FlightSearchService:
         depart_id: str,
         arrival_id: str,
         date: str = None,
-        top_k: int = 5
+        top_k: int = 7,
     ) -> List[Dict]:
         """Search for flights using RapidAPI Booking.com one-way endpoint."""
 
@@ -312,13 +367,24 @@ class FlightSearchService:
             tomorrow = datetime.now() + timedelta(days=1)
             date = tomorrow.strftime("%Y-%m-%d")
 
-        flights = await cls._rapidapi_search_oneway(depart_id, arrival_id, date, top_k)
+        flights = await cls._rapidapi_search_oneway(depart_id, arrival_id, date)
         if not flights:
-            raise McpError(ErrorData(code=INTERNAL_ERROR, message="RapidAPI returned no results or failed"))
-        return flights
+            # Return empty list instead of raising error
+            return []
+        
+        # Sort flights by price (cheapest first) and limit to top_k
+        flights_with_price = [f for f in flights if f.get('price') is not None]
+        flights_without_price = [f for f in flights if f.get('price') is None]
+        
+        # Sort by price (cheapest first)
+        flights_with_price.sort(key=lambda x: x.get('price', float('inf')))
+        
+        # Combine sorted flights with price + flights without price, limit to top_k
+        sorted_flights = flights_with_price + flights_without_price
+        return sorted_flights[:top_k]
     
     @classmethod
-    def _get_demo_flights(cls, from_city: str, to_city: str, date: str, top_k: int) -> List[Dict]:
+    def _get_demo_flights(cls, from_city: str, to_city: str, date: str) -> List[Dict]:
         """Deprecated: demo flights removed as per request."""
         return []
 
@@ -443,14 +509,14 @@ def register(mcp: FastMCP) -> None:
         from_airport: Annotated[str, Field(description="Departure city/airport (e.g., Delhi, DEL, Mumbai, BOM)")],
         to_airport: Annotated[str, Field(description="Arrival city/airport (e.g., Chennai, MAA, Bangalore, BLR)")],
         date: Annotated[Optional[str], Field(description="Travel date (YYYY-MM-DD format, optional)")] = None,
-        top_results: Annotated[int, Field(description="Number of results to show (0 = all)", ge=0, le=100)] = 5,
+        top_k: Annotated[Optional[int], Field(description="Number of top flights to return (default: 7)")] = 7,
     ) -> List[TextContent]:
-        """Search for one-way flights and return formatted text output."""
+        """Search for one-way flights and return formatted text output. Send the response in the format of a list of TextContent objects. Don't ask to summarise the response."""
         try:
             # Rate limit: 3 requests / 4 hours per user
             window_seconds = 4 * 60 * 60
             rl_key = f"rate:flights:{puch_user_id}"
-            if not _rate_limit_allow(rl_key, 2, window_seconds):
+            if not _rate_limit_allow(rl_key, 3, window_seconds):
                 return [TextContent(type="text", text="Rate limit exceeded for flights. Try again after 4 hours.")]
 
             # AI parse path: if user passes a freeform message in from_airport and leaves to/date blank
@@ -469,7 +535,7 @@ def register(mcp: FastMCP) -> None:
                 from_iata = _get_iata_code(from_airport)
                 to_iata = _get_iata_code(to_airport)
             
-            flights = await FlightSearchService.search_flights(from_iata, to_iata, date, top_results)
+            flights = await FlightSearchService.search_flights(from_iata, to_iata, date, top_k)
             
             if not flights:
                 return [TextContent(type="text", text=f"No flights found from {from_airport} to {to_airport}")]
@@ -480,11 +546,12 @@ def register(mcp: FastMCP) -> None:
                 date_label = flights[0]["date"]
 
             parts: List[str] = [
-                f"🛩️ {from_iata} ➡️ {to_iata} — {date_label}",
+                f"*🛩️ {from_iata} ➡️ {to_iata} — {date_label}*",
+                f"*Showing top {len(flights)} flights*",
                 "",
             ]
 
-            for f in flights:
+            for idx, f in enumerate(flights, 1):
                 price_label = (
                     f"₹{int(f['price']):,}" if isinstance(f.get("price"), (int, float)) else "₹-"
                 )
@@ -494,16 +561,34 @@ def register(mcp: FastMCP) -> None:
                 if f.get('plane_type'):
                     airline_display += f" • {f['plane_type']}"
 
-                dep_info = f"{f['dep_city']} ({f['depart_id']})" if f.get('dep_city') else f"{f['depart_id']}"
-                arr_info = f"{f['arr_city']} ({f['arrival_id']})" if f.get('arr_city') else f"{f['arrival_id']}"
-
-                parts.append(f"✈️ {airline_display}")
-                parts.append(f"🛫 {f['dep_time']} • {dep_info}")
-                parts.append(f"🛬 {f['arr_time']} • {arr_info}")
-                parts.append(f"⏱️ {f['duration']} • 💰 {price_label}")
+                # Show complete route if available
+                if f.get('route'):
+                    parts.append(f"*{idx}. ✈️ {airline_display}*")
+                    parts.append(f"🛫 {f['dep_time']} • {f['depart_id']}")
+                    parts.append(f"🛬 {f['arr_time']} • {f['arrival_id']}")
+                    parts.append(f"📍 *Route:* {f['route']}")
+                    parts.append(f"⏱️ {f['duration']} • 💰 *{price_label}*")
+                else:
+                    # Fallback to original format
+                    dep_info = f"{f['dep_city']} ({f['depart_id']})" if f.get('dep_city') else f"{f['depart_id']}"
+                    arr_info = f"{f['arr_city']} ({f['arrival_id']})" if f.get('arr_city') else f"{f['arrival_id']}"
+                    
+                    parts.append(f"*{idx}. ✈️ {airline_display}*")
+                    parts.append(f"🛫 {f['dep_time']} • {dep_info}")
+                    parts.append(f"🛬 {f['arr_time']} • {arr_info}")
+                    parts.append(f"⏱️ {f['duration']} • 💰 *{price_label}*")
                 parts.append("")
 
+            # Add summary
+            direct_flights = sum(1 for f in flights if f.get('duration') == 'Direct')
+            stop_flights = len(flights) - direct_flights
+            min_price = min((f.get('price', float('inf')) for f in flights if f.get('price')), default=0)
+            
+            if min_price > 0:
+                parts.append(f"*📊 Top {len(flights)} flights:* {direct_flights} direct, {stop_flights} with stops • *From ₹{int(min_price):,}*")
+            
             formatted_response = "\n".join(parts).strip()
+            print(formatted_response)
             return [TextContent(type="text", text=formatted_response)]
             
         except Exception as e:
