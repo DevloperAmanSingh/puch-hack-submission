@@ -420,7 +420,6 @@ def _resolve_iata_via_openai(city_name: str) -> Optional[str]:
     system = (
         "You are an expert at converting city names to IATA airport codes. "
         "Return ONLY the 3-letter IATA code for the most relevant airport in that city. "
-        "For major cities with multiple airports, return the primary international airport code. "
         "If you're unsure, return the most likely code. "
         "Respond with ONLY the 3-letter code, nothing else."
     )
@@ -464,7 +463,7 @@ def _parse_freeform_query_to_params(message: str) -> Optional[Dict[str, str]]:
     system = (
         "You extract structured flight search parameters from a user's message. "
         "Return a compact JSON object with keys: from, to, date (YYYY-MM-DD). "
-        "Resolve ambiguous or misspelled city names to the correct major airport city. "
+        "Resolve ambiguous or misspelled city names to the correct airport city. "
         "If only month/day words are given, infer year as next occurrence in the future."
     )
     prompt = f"Message: {message}\nRespond only with JSON."
@@ -498,9 +497,9 @@ def register(mcp: FastMCP) -> None:
     
     # Main flight search tool
     FlightSearchDesc = RichToolDescription(
-        description="Search for one-way flights between cities or airports with detailed flight information",
+        description="Search for one-way flights between cities or airports. Return ONLY the formatted flight data exactly as requested - do NOT summarize, interpret, or ask follow-up questions. Present the data as-is with the specified formatting.",
         use_when="When user wants to find flights between two cities or airports with pricing and schedule details",
-        side_effects="Returns detailed flight options with airline info, times, airports, and prices"
+        side_effects="Returns raw flight data with airline info, times, airports, and prices in the exact format specified"
     )
     
     @mcp.tool(description=FlightSearchDesc.model_dump_json())
@@ -511,7 +510,7 @@ def register(mcp: FastMCP) -> None:
         date: Annotated[Optional[str], Field(description="Travel date (YYYY-MM-DD format, optional)")] = None,
         top_k: Annotated[Optional[int], Field(description="Number of top flights to return (default: 7)")] = 7,
     ) -> List[TextContent]:
-        """Search for one-way flights and return formatted text output. Send the response in the format of a list of TextContent objects. Don't ask to summarise the response."""
+        """Search for one-way flights and return formatted text output. Return ONLY the flight data exactly as formatted - do NOT add summaries, interpretations, or follow-up questions. Present the raw data as-is."""
         try:
             # Rate limit: 3 requests / 4 hours per user
             window_seconds = 4 * 60 * 60
