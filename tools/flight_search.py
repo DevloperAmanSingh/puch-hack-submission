@@ -420,6 +420,7 @@ def _resolve_iata_via_openai(city_name: str) -> Optional[str]:
     system = (
         "You are an expert at converting city names to IATA airport codes. "
         "Return ONLY the 3-letter IATA code for the most relevant airport in that city. "
+        "For military airbases or smaller airports, return their specific IATA code (e.g., Hindon -> HDD, not Delhi). "
         "If you're unsure, return the most likely code. "
         "Respond with ONLY the 3-letter code, nothing else."
     )
@@ -464,9 +465,11 @@ def _parse_freeform_query_to_params(message: str) -> Optional[Dict[str, str]]:
         "You extract structured flight search parameters from a user's message. "
         "Return a compact JSON object with keys: from, to, date (YYYY-MM-DD). "
         "Resolve ambiguous or misspelled city names to the correct airport city. "
-        "If only month/day words are given, infer year as next occurrence in the future."
+        "For specific airports, military bases, or smaller airports, return the exact airport name, not the main city. "
+        "If only month/day words are given, infer year as next occurrence in the future. "
+        "Respond with ONLY valid JSON, no additional text."
     )
-    prompt = f"Message: {message}\nRespond only with JSON."
+    prompt = f"Message: {message}\nExtract flight parameters and respond with JSON only."
     try:
         resp = client.chat.completions.create(
             model=getenv("OPENAI_MODEL", "gpt-4o-mini"),
@@ -475,19 +478,37 @@ def _parse_freeform_query_to_params(message: str) -> Optional[Dict[str, str]]:
                 {"role": "user", "content": prompt},
             ],
             temperature=0,
+            max_tokens=100,
         )
         content = resp.choices[0].message.content or ""
-        # Extract JSON object from response
-        m = re.search(r"\{[\s\S]*\}", content)
-        if not m:
-            return None
-        parsed = json.loads(m.group(0))
+        
+        # Try to parse JSON directly first
+        try:
+            parsed = json.loads(content.strip())
+        except json.JSONDecodeError:
+            # If direct parsing fails, try to extract JSON from the response
+            # Look for JSON-like content between curly braces
+            start = content.find('{')
+            end = content.rfind('}')
+            if start != -1 and end != -1 and end > start:
+                json_str = content[start:end+1]
+                try:
+                    parsed = json.loads(json_str)
+                except json.JSONDecodeError:
+                    return None
+            else:
+                return None
+        
         out = {
-            "from": _get_iata_code(str(parsed.get("from", "")).strip()),
-            "to": _get_iata_code(str(parsed.get("to", "")).strip()),
+            "from": str(parsed.get("from", "")).strip(),
+            "to": str(parsed.get("to", "")).strip(),
             "date": str(parsed.get("date", "")).strip(),
         }
-        return out if out["from"] and out["to"] and out["date"] else None
+        
+        # Only return if we have valid from and to locations
+        if out["from"] and out["to"] and out["date"]:
+            return out
+        return None
     except Exception:
         return None
 
@@ -523,8 +544,8 @@ def register(mcp: FastMCP) -> None:
                 combined = from_airport
                 parsed = _parse_freeform_query_to_params(combined)
                 if parsed:
-                    from_iata = parsed["from"]
-                    to_iata = parsed["to"]
+                    from_iata = _get_iata_code(parsed["from"])
+                    to_iata = _get_iata_code(parsed["to"])
                     date = parsed["date"]
                 else:
                     # fallback to mapping
