@@ -203,7 +203,9 @@ class FlightSearchService:
                     pass
             return None
 
-        for idx, offer in enumerate(sorted_items[: max(1, min(top_k, 5))]):
+        # Determine how many offers to process. If top_k <= 0 or None, return all
+        limit = len(sorted_items) if (top_k is None or top_k <= 0) else top_k
+        for idx, offer in enumerate(sorted_items[: limit]):
             try:
                 segments = offer.get("segments") or []
                 segment0 = segments[0] if segments else {}
@@ -441,7 +443,7 @@ def register(mcp: FastMCP) -> None:
         from_airport: Annotated[str, Field(description="Departure city/airport (e.g., Delhi, DEL, Mumbai, BOM)")],
         to_airport: Annotated[str, Field(description="Arrival city/airport (e.g., Chennai, MAA, Bangalore, BLR)")],
         date: Annotated[Optional[str], Field(description="Travel date (YYYY-MM-DD format, optional)")] = None,
-        top_results: Annotated[int, Field(description="Number of top results to show", ge=1, le=10)] = 5,
+        top_results: Annotated[int, Field(description="Number of results to show (0 = all)", ge=0, le=100)] = 5,
     ) -> List[TextContent]:
         """Search for one-way flights and return formatted text output."""
         try:
